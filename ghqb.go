@@ -10,10 +10,6 @@ type GithubQueryParam interface {
 	fmt.Stringer
 }
 
-const (
-	GhQueryDateFormat = "2006-01-02T15:04:05+07:00"
-)
-
 type timeOrd int8
 
 const (
@@ -33,12 +29,12 @@ const (
 func (t timeOrd) String() string {
 	var out = ""
 	switch t {
+	case ORD_EQ:
+		out = ""
 	case ORD_LT:
 		out = "<"
 	case ORD_LEQ:
 		out = "<="
-	case ORD_EQ:
-		out = "="
 	case ORD_GEQ:
 		out = ">="
 	case ORD_GT:
@@ -47,66 +43,81 @@ func (t timeOrd) String() string {
 	return out
 }
 
-type queryString string
-
-func (s queryString) String() string {
-	return string(s)
+type excluded struct {
+	excluded bool
 }
 
-type excludedQuery bool
-
-type tagQuery struct {
-	excluded excludedQuery
-	tag      string
+func (e *excluded) exclude() {
+	e.excluded = true
 }
-
-func (s *tagQuery) Exclude() {
-	s.excluded = true
-}
-
-func (t excludedQuery) String() string {
-	if t {
+func (e excluded) String() string {
+	if e.excluded {
 		return "-"
 	} else {
 		return ""
 	}
 }
 
-type singleQueryParam[T fmt.Stringer] struct {
-	tagQuery
-	value T
+type tagQuery struct {
+	tag string
 }
 
-func (s *singleQueryParam[T]) String() string {
+type textParam struct {
+	excluded
+	value string
+}
+
+func (t *textParam) Excluded() *textParam {
+	t.exclude()
+	return t
+}
+func (t *textParam) String() string {
+	return fmt.Sprintf(`%s"%s"`, t.excluded, t.value)
+}
+
+func Text(value string) *textParam {
+	return &textParam{
+		value: value,
+	}
+}
+
+type singleQueryParam struct {
+	tagQuery
+	excluded
+	value string
+}
+
+func (s *singleQueryParam) String() string {
 	return fmt.Sprintf("%s%s:%s", s.excluded, s.tag, s.value)
 }
 
-func (c *singleQueryParam[T]) Excluded() *singleQueryParam[T] {
-	c.Exclude()
+func (c *singleQueryParam) Excluded() *singleQueryParam {
+	c.exclude()
 	return c
 }
 
-func NewSingleQueryParam[T fmt.Stringer](tag string, value T) *singleQueryParam[T] {
-	return &singleQueryParam[T]{
+func NewSingleQueryParam(tag string, value string) *singleQueryParam {
+	return &singleQueryParam{
 		tagQuery: tagQuery{tag: tag},
 		value:    value,
 	}
 }
 
-func Organization(orgName string) *singleQueryParam[queryString] {
-	return NewSingleQueryParam(tag_organization, queryString(orgName))
+func Organization(orgName string) *singleQueryParam {
+	return NewSingleQueryParam(tag_organization, orgName)
 }
 
-func Label(labels ...string) *singleQueryParam[queryString] {
-	return NewSingleQueryParam(tag_label, queryString(strings.Join(labels, ",")))
+func Label(labels ...string) *singleQueryParam {
+	return NewSingleQueryParam(tag_label, strings.Join(labels, ","))
 }
 
-func Repository(repoName string) *singleQueryParam[queryString] {
-	return NewSingleQueryParam(tag_repository, queryString(repoName))
+func Repository(repoName string) *singleQueryParam {
+	return NewSingleQueryParam(tag_repository, repoName)
 }
 
 type timeQueryBetween struct {
 	tagQuery
+	excluded
 	format string
 	start  time.Time
 	end    time.Time
@@ -123,12 +134,13 @@ func (c *timeQueryBetween) String() string {
 }
 
 func (c *timeQueryBetween) Excluded() *timeQueryBetween {
-	c.Exclude()
+	c.exclude()
 	return c
 }
 
 type timeQuerySingle struct {
 	tagQuery
+	excluded
 	format string
 	ord    timeOrd
 	value  time.Time
@@ -144,8 +156,8 @@ func (t *timeQuerySingle) String() string {
 	)
 }
 
-func (c *timeQuerySingle) Exclude() *timeQuerySingle {
-	c.Exclude()
+func (c *timeQuerySingle) exclude() *timeQuerySingle {
+	c.exclude()
 	return c
 }
 
