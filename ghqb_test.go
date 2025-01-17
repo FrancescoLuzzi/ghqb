@@ -1,4 +1,4 @@
-package builder
+package ghqb
 
 import (
 	"crypto/rand"
@@ -12,9 +12,9 @@ import (
 
 var testTime = time.Now()
 var timeOrds []timeOrd = []timeOrd{
-	ORD_EQ,
 	ORD_LT,
 	ORD_LEQ,
+	ORD_EQ,
 	ORD_GEQ,
 	ORD_GT,
 }
@@ -23,32 +23,49 @@ const testOrgRepo = "test"
 
 func addRepoCase(tests map[GithubQueryParam]string, repoName string) {
 	tests[Repository(repoName)] = fmt.Sprintf("repo:%s", repoName)
+	tests[Repository(repoName).Excluded()] = fmt.Sprintf("-repo:%s", repoName)
 }
 
 func addOrgCase(tests map[GithubQueryParam]string, orgName string) {
 	tests[Organization(orgName)] = fmt.Sprintf("org:%s", orgName)
+	tests[Organization(orgName).Excluded()] = fmt.Sprintf("-org:%s", orgName)
 }
 
 func addCreatedCase(tests map[GithubQueryParam]string, t time.Time, o timeOrd) {
 	tests[Created(t, o)] = fmt.Sprintf("created:%s%s", o, t.Format(time.DateOnly))
+	tests[Created(t, o).Excluded()] = fmt.Sprintf("-created:%s%s", o, t.Format(time.DateOnly))
 	tests[CreatedTimezoned(t, o)] = fmt.Sprintf("created:%s%s", o, t.Format(time.RFC3339))
+	tests[CreatedTimezoned(t, o).Excluded()] = fmt.Sprintf("-created:%s%s", o, t.Format(time.RFC3339))
 }
 
 func addClosedCase(tests map[GithubQueryParam]string, t time.Time, o timeOrd) {
 	tests[Closed(t, o)] = fmt.Sprintf("closed:%s%s", o, t.Format(time.DateOnly))
+	tests[Closed(t, o).Excluded()] = fmt.Sprintf("-closed:%s%s", o, t.Format(time.DateOnly))
 	tests[ClosedTimezoned(t, o)] = fmt.Sprintf("closed:%s%s", o, t.Format(time.RFC3339))
+	tests[ClosedTimezoned(t, o).Excluded()] = fmt.Sprintf("-closed:%s%s", o, t.Format(time.RFC3339))
 }
 
-func addCreatedBetween(tests map[GithubQueryParam]string, start, end time.Time) {
+func addCreatedBetweenCase(tests map[GithubQueryParam]string, start, end time.Time) {
 	tests[CreatedBetween(start, end)] = fmt.Sprintf("created:%s..%s", start.Format(time.DateOnly), end.Format(time.DateOnly))
+	tests[CreatedBetween(start, end).Excluded()] = fmt.Sprintf("-created:%s..%s", start.Format(time.DateOnly), end.Format(time.DateOnly))
 	tests[CreatedBetweenTimezoned(start, end)] = fmt.Sprintf("created:%s..%s", start.Format(time.RFC3339), end.Format(time.RFC3339))
-}
-func addClosedBetween(tests map[GithubQueryParam]string, start, end time.Time) {
-	tests[ClosedBetween(start, end)] = fmt.Sprintf("closed:%s..%s", start.Format(time.DateOnly), end.Format(time.DateOnly))
-	tests[ClosedBetweenTimezoned(start, end)] = fmt.Sprintf("closed:%s..%s", start.Format(time.RFC3339), end.Format(time.RFC3339))
+	tests[CreatedBetweenTimezoned(start, end).Excluded()] = fmt.Sprintf("-created:%s..%s", start.Format(time.RFC3339), end.Format(time.RFC3339))
 }
 
-func TestOrdCases(t *testing.T) {
+func addClosedBetweenCase(tests map[GithubQueryParam]string, start, end time.Time) {
+	tests[ClosedBetween(start, end)] = fmt.Sprintf("closed:%s..%s", start.Format(time.DateOnly), end.Format(time.DateOnly))
+	tests[ClosedBetween(start, end).Excluded()] = fmt.Sprintf("-closed:%s..%s", start.Format(time.DateOnly), end.Format(time.DateOnly))
+	tests[ClosedBetweenTimezoned(start, end)] = fmt.Sprintf("closed:%s..%s", start.Format(time.RFC3339), end.Format(time.RFC3339))
+	tests[ClosedBetweenTimezoned(start, end).Excluded()] = fmt.Sprintf("-closed:%s..%s", start.Format(time.RFC3339), end.Format(time.RFC3339))
+}
+
+func addTextCase(tests map[GithubQueryParam]string, value string) {
+	tests[Text(value)] = fmt.Sprintf(`"%s"`, value)
+	tests[Text(value).Excluded()] = fmt.Sprintf(`-"%s"`, value)
+}
+
+func TestTimeOrd(t *testing.T) {
+	t.Parallel()
 	tests := map[timeOrd]string{
 		ORD_EQ:  "",
 		ORD_LT:  "<",
@@ -62,6 +79,7 @@ func TestOrdCases(t *testing.T) {
 }
 
 func TestQueryString(t *testing.T) {
+	t.Parallel()
 	tests := make(map[GithubQueryParam]string)
 	addRepoCase(tests, testOrgRepo)
 	addOrgCase(tests, testOrgRepo)
@@ -77,19 +95,80 @@ func TestQueryString(t *testing.T) {
 	assert.Nil(t, err, "something went wrong while generating a random offset")
 
 	end := testTime.Add(time.Hour * time.Duration(offset.Int64()))
-	addCreatedBetween(tests, testTime, end)
-	addClosedBetween(tests, testTime, end)
-	addCreatedBetween(tests, utcTestTime, end)
-	addClosedBetween(tests, utcTestTime, end)
+	addTextCase(tests, testOrgRepo)
+	addCreatedBetweenCase(tests, testTime, end)
+	addClosedBetweenCase(tests, testTime, end)
+	addCreatedBetweenCase(tests, utcTestTime, end)
+	addClosedBetweenCase(tests, utcTestTime, end)
 
 	for test, expected := range tests {
-		assert.Equal(t, expected, test.String())
+		value, err := test.Format()
+		assert.NoError(t, err)
+		assert.Equal(t, expected, value)
 	}
 }
 
+func TestQueryBetweenFail(t *testing.T) {
+	now := time.Now()
+	future := now.AddDate(1, 0, 0)
+	type testFunc func(start, end time.Time) *timeQueryBetween
+	tests := []testFunc{
+		CreatedBetween,
+		ClosedBetween,
+		ClosedBetweenTimezoned,
+		CreatedBetweenTimezoned,
+	}
+	for _, f := range tests {
+		_, err := f(future, now).Format()
+		assert.ErrorIs(t, err, ErrInvalidTimePeriod)
+	}
+}
+
+func TestQueryOK(t *testing.T) {
+	now := time.Now()
+	future := now.AddDate(1, 0, 0)
+	_, err := Query(
+		Text("test"),
+		Repository("test"),
+		Organization("test"),
+		CreatedBetween(now, future),
+	)
+	assert.NoError(t, err)
+}
+
+func TestQueryKO(t *testing.T) {
+	now := time.Now()
+	future := now.AddDate(1, 0, 0)
+	_, err := Query(
+		CreatedBetween(future, now),
+		ClosedBetween(future, now),
+	)
+	assert.Error(t, err)
+}
+
+// Examples
+
+func ExampleQuery() {
+	end := time.Date(2025, 01, 13, 10, 0, 0, 0, time.Local)
+	start := end.AddDate(0, 0, -2)
+	query, err := Query(
+		Organization("testOrg"),
+		Repository("testRepo"),
+		ClosedBetween(start, end),
+	)
+	if err != nil {
+		// something went wrong
+	}
+	fmt.Print(query)
+	// Output:
+	// org:testOrg repo:testRepo closed:2025-01-11..2025-01-13
+}
+
+// Benchmarks
+
 var res GithubQueryParam
 
-func Benchmark_Repository(b *testing.B) {
+func BenchmarkRepository(b *testing.B) {
 	var r GithubQueryParam
 	b.ReportAllocs()
 	for n := 0; n < b.N; n++ {

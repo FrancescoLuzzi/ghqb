@@ -1,13 +1,14 @@
-package builder
+package ghqb
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
 
 type GithubQueryParam interface {
-	fmt.Stringer
+	Format() (string, error)
 }
 
 type timeOrd int8
@@ -62,6 +63,17 @@ type tagQuery struct {
 	tag string
 }
 
+type rawQuery string
+
+func (t *rawQuery) Format() (string, error) {
+	return string(*t), nil
+}
+
+func RawQuery(query string) *rawQuery {
+	q := rawQuery(query)
+	return &q
+}
+
 type textParam struct {
 	excluded
 	value string
@@ -71,8 +83,8 @@ func (t *textParam) Excluded() *textParam {
 	t.exclude()
 	return t
 }
-func (t *textParam) String() string {
-	return fmt.Sprintf(`%s"%s"`, t.excluded, t.value)
+func (t *textParam) Format() (string, error) {
+	return fmt.Sprintf(`%s"%s"`, t.excluded, t.value), nil
 }
 
 func Text(value string) *textParam {
@@ -87,8 +99,8 @@ type singleQueryParam struct {
 	value string
 }
 
-func (s *singleQueryParam) String() string {
-	return fmt.Sprintf("%s%s:%s", s.excluded, s.tag, s.value)
+func (s *singleQueryParam) Format() (string, error) {
+	return fmt.Sprintf("%s%s:%s", s.excluded, s.tag, s.value), nil
 }
 
 func (c *singleQueryParam) Excluded() *singleQueryParam {
@@ -123,14 +135,17 @@ type timeQueryBetween struct {
 	end    time.Time
 }
 
-func (c *timeQueryBetween) String() string {
+func (c *timeQueryBetween) Format() (string, error) {
+	if c.start.After(c.end) {
+		return "", ErrInvalidTimePeriod
+	}
 	return fmt.Sprintf(
 		"%s%s:%s..%s",
 		c.excluded,
 		c.tag,
 		c.start.Format(c.format),
 		c.end.Format(c.format),
-	)
+	), nil
 }
 
 func (c *timeQueryBetween) Excluded() *timeQueryBetween {
@@ -146,17 +161,17 @@ type timeQuerySingle struct {
 	value  time.Time
 }
 
-func (t *timeQuerySingle) String() string {
+func (t *timeQuerySingle) Format() (string, error) {
 	return fmt.Sprintf(
 		"%s%s:%s%s",
 		t.excluded,
 		t.tag,
 		t.ord,
 		t.value.Format(t.format),
-	)
+	), nil
 }
 
-func (c *timeQuerySingle) exclude() *timeQuerySingle {
+func (c *timeQuerySingle) Excluded() *timeQuerySingle {
 	c.exclude()
 	return c
 }
@@ -208,10 +223,15 @@ func ClosedTimezoned(t time.Time, ord timeOrd) *timeQuerySingle {
 
 func Query(params ...GithubQueryParam) (string, error) {
 	var builder strings.Builder
-	var err error
+	var errs []error
 	for _, param := range params {
-		builder.WriteString(param.String())
+		queryPiece, err := param.Format()
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		builder.WriteString(queryPiece)
 		builder.WriteRune(' ')
 	}
-	return builder.String(), err
+	return builder.String(), errors.Join(errs...)
 }
